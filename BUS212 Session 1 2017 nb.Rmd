@@ -1,0 +1,117 @@
+---
+title: "BUS212 Session 1"
+author: "Rob Carver, Brandeis IBS"
+date: "March 2017"
+output:
+  word_document: default
+  html_notebook: default
+  html_document: default
+---
+This script illustrates some common tasks and "best practices". It also illustrates the value and utility of using *R Markdown* when creating reports in R.
+
+Before trying to run this code, visit our class GitHub repository and grab the r script `bigdatapackages.R` and the Word document called "Making your class directory the default start.docx". Run the script *once* (it will take a while), and follow the defaulty starting directory instructions.
+
+I like to start with a code block that invokes packages that will be used in the code. 
+
+```{r}
+library(readr)  # provide additional data-reading functions
+library(corrplot) # attractive correlation graphs
+```
+
+Each user must set a working directory for her/his own computer.  I urge you to set up a directory for all of your R work. Within that, create a folder for BUS212, and then within *that* have 2 folders: one for Data, one for Scripts. 
+
+See the document titled "How to set your default working directory" on LATTE under the _R Resources section_.
+
+In this example, my main R directory is located in my Brandeis Box account. We read the data using `read_csv` from package `readr`, rather than the usual`read.csv`.  We'll work with the data as a "tibble" rather than a data frame. 
+
+```{r, warning=FALSE, message=FALSE}
+setwd("C:/Users/Rob/Box Sync/My R Work/BUS212")
+mydata <- read_csv("Data/On_Time_50.csv")
+```
+
+In this example, we'll eventually want to do some modeling on the variable called `ArrDelay`. First let's get familiar with the data.
+
+Helpful exploratory commands:
+
+* dim -- report # rows & # columns 
+* names -- report column names
+* str -- show the structure of object
+* head -- show the first several rows of data
+* summary -- compute Tukey's 5 number summary + mean for a variable
+
+```{r}
+dim(mydata)
+head(mydata)
+summary(mydata$ArrDelay)   # compute stats for one variable
+```
+
+Suppose that we want to create a model to account for arrival delays longer than 15 minutes. This table has 50 variables, and surely many of the variables are not relevant to our purpose. Somewhat arbitrarily, let's select some columns that might be useful in such a model. 
+
+Next we create a new object containing 4 of the 50 variables (as specified), and only use rows where `ArrDelay > 15` minutes. This is simliar to *Select... Where* in SQL.
+
+```{r}
+
+# to simplify the subset command, first set up a vector of column names
+varlist <- c("DepDelay", "ArrDelay", "AirTime", "Distance")
+myvars <-subset (mydata, ArrDelay > 15, select=varlist)
+str(myvars)
+```
+
+
+This creates a more compact data table with fewer than 9000 rows. Suppose we want to build a regression model to estimate arrival delays. As standard practice in model-building with "big data" we first split the large data frame into two partitions:
+
+* a TRAINING set, used to initially develop a model for use
+* a TEST set, used to validate the model with a new "out of sample" batch of data
+
+```{r}
+# Demonstrate concept of partitioning a dataframe into Training
+# and Testing samples
+
+set.seed(1234)   # initialize the random number generator for reproducibilty.
+# Use an integer of your choosing.
+
+# Below, "ind" will be a vectors of randomly generated 1s and 2s. There will be as
+# many values as there are rows of data in the myvars df. 60% of the ind values 
+# will equal 1 nad 40% will equal 2.
+ind <- sample(2,nrow(myvars),replace=TRUE, prob=c(0.6,0.4)) 
+table(ind)
+train <- myvars[ind==1,]  # new df "train" will consists of randomly 
+        # chosen rows from myvars, corresponding to the 1's in ind.
+test <- myvars[ind==2,]
+
+dim(train)
+dim(test)
+```
+
+Before creating models, lets look at the correlations among the numeric variables. To help visualize the correlations, we'll use the package called "corrplot". 
+
+```{r}
+tr <- subset(train, select=c("ArrDelay","DepDelay","AirTime", "Distance"))
+
+cm <- cor(tr, method="pearson")
+cm
+corrplot(cm, method= "ellipse", type="lower" )
+```
+
+Now we'll estimate 2 "candidate" linear regression models to estimate arrival. We'll choose the better model to re-run with the training data. 
+
+The important R function is `lm` (for linear model). We create the two models and then use `summary` to report results.
+
+```{r}
+lm1 <- lm(ArrDelay ~ DepDelay, data = tr)
+summary(lm1)
+lm2 <- lm(ArrDelay ~ DepDelay + Distance, data = tr)
+summary(lm2)
+
+```
+
+The second model appears to be barely better than the first. Now re-estimate it with the *test* data set and see if the quality of the model persists.
+
+```{r}
+lm1t <- lm(ArrDelay ~ DepDelay, data = test)
+summary(lm1t)
+lm2t <- lm(ArrDelay ~ DepDelay + Distance, data = test)
+summary(lm2t)
+
+```
+
