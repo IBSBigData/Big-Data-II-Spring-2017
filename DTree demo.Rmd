@@ -1,0 +1,57 @@
+---
+title: "Decision Tree Demo"
+author: "Rob Carver"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+This document demonstrates (a) use of package `party` and well as (b) R Markdown to analyze data and create a presentation-ready document.
+
+The example is adapted adapted from Shmueli, Patel, & Bruce, _Data Mining for Business Intelligence_, Chapter 9, wiley 2010
+
+In a Markdown document, we insert chunks of R code between ordinary text. There are some important differences between writing typical scripts and using markdown. For example:
+
+*   by default, all code chunks display in the resulting document, as does output and error messages. We can suppress messages if we want. 
+*   file paths must be typed out fully
+
+Set your working directory before executing this script, and then we'll read the file with an explicit identification of the data directory. 
+
+```{r, message=FALSE, warning=FALSE}
+library(party)
+
+```
+
+Next we read the data file for the problem. In this case, I first copied the "Mower.csv" file from GitHub and saved it in my data directory.
+
+```{r}
+#Read file
+mydata<-read.csv("C:/Users/Rob/Box Sync/My R Work/BUS212/Data/Mower.csv",header=T)
+# header=T not needed,
+# but is a reminder that the option is available
+```
+
+With the data in a dataframe, we can now build a tree using the `ctree` command in the `party` package. We identify the target  (Y) variable and X factors to include in the tree.  
+
+The control options and theory are explained in class and in the assigned readings. 
+
+```{r}
+datactree <- ctree(Own~Income+LotSz, mydata,
+                   controls=ctree_control(mincriterion=0.9, minsplit=5))
+print(datactree)  # print the tree rules
+plot(datactree,type="simple")  # display the tree
+```
+
+One simple way to evaluate the performance of a classification model is to create a cross-tab of the model decisions compared to the observed data. We call this cross-tab a _Confusion Matrix_, and compute the percentage of cases that were *misclassified* by the model. 
+
+```{r}
+# make the table and display it
+
+tab<-table(predict(datactree), mydata$Own)
+print(tab)
+
+# now compute misclassification rate
+1-sum(diag(tab))/sum(tab)
+
+```
