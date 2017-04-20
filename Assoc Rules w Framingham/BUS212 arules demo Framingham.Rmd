@@ -1,0 +1,154 @@
+---
+title: "Association Rules"
+author: "Rob Carver"
+output:
+  word_document: default
+  html_notebook: default
+---
+
+We can use a modified version of the Framingham Heart Study dataset to demonstrate association analysis (also known as 'market basket' analysis). Unlike the clustering methods we recently studied, association rules work exclusively with discrete categorical data. Hence, early in our process we need to convert all continuous variables into discrete ordinal factors.
+
+As usual, we load packages. For association rules, our main packages are `arules` and `arulesViz`. The former discovers the rules, and the latter provides several options for visualizing rules.
+
+```{r, warning=FALSE, message=FALSE}
+# First load all packages
+
+library(arules)
+library(arulesViz)
+library(readr)
+```
+
+As we did in an earlier script, we read in the data, redefine the ANYCHD.2 variable as a factor. Before partitioning the data into training and test sets, we'll create factors based on the numeric variables. As a first approach, we'll transform each continuous numeric into a 5-level ordinal factor.
+
+```{r, message=FALSE, warning=FALSE}
+fram <- read.csv("C:/Users/Rob/Box Sync/My R Work/BUS212/Data/frmgham1.csv")
+
+# Target variable is in final column "ANYCHD.2"
+# ANYCHD.2 reads in as an integer, so make it a factor
+
+fram$`ANYCHD.2` <- factor(fram$ANYCHD.2)
+print("ANYCHD.2 in Full Framingham data table")
+table(fram$ANYCHD.2)  # dummy, 1 = has heart disease
+
+# This dataset has a small number of missing values # for a few variables. For this demo, we'll drop cases
+# with missing
+framcols <- c(2:18, 39)  # subset main data frame,
+framsub <- na.omit(fram[,framcols])
+print("ANYCHD.2 Subset with missing removed")
+table(framsub$ANYCHD.2)
+
+```
+
+The dataframe `framsub` now has 18 numeric columns.This chunk of code will create a new dataframe of all categorical variables . The dichotomous will remain 2-level factors, and the others will become  a 5-level factor.
+
+We use the `cut` function from base R. According to R Documnentation, "`cut` divides the range of x into intervals, and codes the values in x according to which interval they fall."  With `cut` we can either specify a number of levels or specify a list of break-points. For this analysis, we'll ask for 5 levels and ordinal data. 
+
+```{r, warning=FALSE, message=FALSE}
+attach(framsub)  # reduce typing here
+framc <- data.frame(ANYCHD.2)
+framc$sex <- factor(SEX, labels=c("Male", "Female"))
+framc$chol <- cut(TOTCHOL, 5, ordered_result = T)
+framc$age <- cut(AGE,5, ordered_result = T)
+framc$sysbp <- cut(SYSBP,5, ordered_result = T)
+framc$diabp <- cut(DIABP,5, ordered_result = T)
+framc$cursmoke <- factor(CURSMOKE)
+framc$cigpday <- cut(CIGPDAY, 5, ordered_result = TRUE)
+framc$bmi <- cut(BMI, 5, ordered_result = TRUE)
+framc$diabetes <- factor(DIABETES)
+framc$bpmeds <- factor(BPMEDS)
+framc$heart <- cut(HEARTRTE, 5, ordered_result = TRUE)
+framc$glucse <- cut(GLUCOSE, 5, ordered_result = TRUE)
+framc$educ <- factor(educ, labels = c("< HS", "HS", "Some college","College or more"))
+framc$prevchd <- factor(PREVCHD)
+framc$prevap <- factor(PREVAP)
+framc$prevmi <- factor(PREVMI)
+framc$prevstrk <- factor(PREVSTRK)
+
+##  
+### show results of these commands
+head(framc)
+detach(framsub)
+```
+
+As usual, we partition the data into train and test sets and investigate the training data for association rules
+
+```{r}
+
+# Train and test sets
+n <- nrow(framc)
+set.seed(7752)
+test_idx <- sample.int(n, size= round(0.3 * n))  # 30% test set
+train <- framc[-test_idx,]  # train has all rows except the index 
+test <- framc[test_idx,]
+```
+
+Our `train` set is a dataframe of 2,375 adults. The `arules` package needs a *transaction* object rather than a dataframe; in a transaction object, each line of data is understood as a wide list of items contained a single transaction, as explained in class and readings.  We can easily convert the dataframe into a formal transaction object with one command:
+
+```{r}
+train.trans <- as(train, "transactions")
+summary(train.trans)
+itemFrequencyPlot(train.trans, support=.6)
+
+```
+
+Now let's start looking for rules using the a priori method. Typically this is an iterative process in which we use `paramter=list()` control to specify a minimum support level (frequency of occurrence) and minimum confidence (conditional probabilility of RHS | LHS). The goal is to find a rule set that is manageable in length and applicability. Remember that only about 27% of the patients do have any chd on the 2nd visit, so we should set support below 27% if we want to capture those patients.
+
+```{r}
+chd_rules <- apriori(train.trans, parameter=list(support=0.05, conf = 0.50,
+          target="rules"))
+```
+
+This first set of criteria created more than 2.4 million rules! That's far too many to analyze. Let's raise the minimums substantially (in fact I tried several other combinations before settling on these):
+
+```{r}
+chd_rules <- apriori(train.trans, parameter=list(support=0.2, conf = 0.90,
+          target="rules"))
+```
+
+Now we have 70,000+ rules, many of which will surely be redundant and not involve our target variable. At this point, though, let's inspects a few of the rules:
+
+```{r}
+options(digits = 3)
+summary(chd_rules)
+inspect(subset(chd_rules, lift > 2)[1:5,])
+```
+
+These few rules are obvious , but they do illustrate how association rules operate. The rules above are *unsupervised* -- they simply identify frequent itemsets that co-occur. 
+
+We can also conduct supervised learning but selecting a right-hand side of interest to us. For example, let's find the rules that point to the presence of any coronary heart disease on the second visit.
+
+```{r}
+anychd_rules <- apriori(train.trans, 
+     parameter=list(support=0.05, conf = 0.35, target="rules"),
+     appearance = list(rhs=c("ANYCHD.2=1"),
+     default = "lhs"))
+rules.sorted <- sort(anychd_rules, by="lift")
+inspect(subset(rules.sorted, lift > 1.4)[1:5,])
+
+```
+
+Notice that some of these rules are redundant. We can "prune" redundant rules as follows:
+
+```{r}
+# first find redundant rules
+subset.matrix <- is.subset(rules.sorted, rules.sorted)
+subset.matrix[lower.tri(subset.matrix, diag=T)] <- NA
+redundant <- colSums(subset.matrix, na.rm=T) >= 1
+
+# remove redundant rules
+rules.pruned <- rules.sorted[!redundant]
+inspect(subset(rules.pruned[1:5,]))
+```
+
+Now that we have a set of rules, let's take a look at them. Package `arulesViz` provides several helpful ways to visualize the rules.
+
+```{r}
+plot(rules.pruned)
+plot(rules.pruned, method="graph", control = list(type="items"))
+subrules <- sample(rules.pruned, 10)
+plot(subrules, method="graph")
+plot(rules.pruned, method="paracoord")
+plot(rules.pruned, method="grouped")
+
+```
+
