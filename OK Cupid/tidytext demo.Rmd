@@ -1,0 +1,110 @@
+---
+title: "Beginning Sentiment and n-gram analysis with tidytext"
+output: html_notebook
+---
+
+#Goal: Introduce tidytext approach with okcupid essays
+This notebook provides a starting point to doing some simple sentiment and n-gram analysis.  To illustrate, I just use the `okcupiddata` source data, but in your project you'll also use the `essay4plus.txt` tab-separated values file. 
+
+Also, in the project, you will compare the sexes or people of different orientation. For these examples, I'll group by their response to the question  "do you smoke?" -- 5 categories.
+
+As always, we set the working directory and then load the packages we want.
+```{r, warning=FALSE, message=FALSE}
+library(readr)
+library(tidyr)
+library(tidytext)
+library(okcupiddata)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(scales) # scale functions for visualization
+library(wordcloud)
+library(igraph)
+library(ggraph)
+library(reshape2)
+```
+First step is to subset the `okcupid profiles` object into the essays and smoker status columns.
+
+```{r}
+profiles <-tbl_df(profiles)
+table(profiles$smokes)
+
+n <- nrow(profiles)
+tidy_okcupid <- select_(profiles,"essay0","smokes") 
+tidy_okcupid <- data_frame(line=1:n, text=profiles$essay0,
+                smokes=profiles$smokes) %>%
+     unnest_tokens(word, text)
+tidy_okcupid
+```
+We see that the vast majority of people are non-smokers. To simplify, I create a new two-level variable for smokers and non-smokers. Along the way, let's also remove stopwords.
+```{r}
+tidy_okcupid <- tidy_okcupid %>%
+     mutate(smoker = ifelse(smokes=="no","no","yes")) %>%
+     select(-smokes) %>%
+     anti_join(stop_words)
+tidy_okcupid
+
+```
+Next, I bring in some sentiment analysis. First example uses the nrc positive and negative classifications and focuses just on what smokers wrote.
+
+```{r}
+nrcpos <- get_sentiments("nrc") %>% 
+     filter(sentiment == "positive")
+nrcneg <- get_sentiments("nrc") %>%
+     filter(sentiment == "negative")
+
+tidy_okypos <-tidy_okcupid %>%
+     filter(smoker == "yes") %>%
+     inner_join(nrcpos) %>%
+     count(word, sort = TRUE)
+
+tidy_okyneg <-tidy_okcupid %>%
+     filter(smoker == "yes") %>%
+     inner_join(nrcneg) %>%
+     count(word, sort = TRUE)
+
+top_n(tidy_okypos,10)
+top_n(tidy_okyneg,10)
+```
+We could use the above results to create word clouds, but let's next use the `bing` lexicon to creative some word clouds. Just for comparison, we'll continue to focus on smokers.
+```{r, warning=FALSE}
+sentbing <- tidy_okcupid %>%
+     inner_join(get_sentiments("bing")) %>%
+     count(word, index = line %/% 10, sentiment) %>%
+     spread(sentiment, n, fill = 0) %>%
+     mutate(sentiment = positive - negative)
+
+smokerwords <- tidy_okcupid %>% 
+     filter(smoker == "yes")
+
+bing_word_counts <- smokerwords %>%
+     inner_join(get_sentiments("bing")) %>%
+     count(word, sentiment, sort = TRUE) %>%
+     ungroup()
+
+bing_word_counts %>%
+     group_by(sentiment) %>%
+     top_n(10) %>%
+     ungroup() %>%
+     mutate(word = reorder(word, n)) %>%
+     ggplot(aes(word, n, fill = sentiment)) +
+     geom_col(show.legend = FALSE) +
+     facet_wrap(~sentiment, scales = "free_y") +
+     labs(y = "Contribution to sentiment",
+          x = NULL) +
+     coord_flip()
+
+
+smokerwords%>%
+     anti_join(stop_words) %>%
+     count(word) %>%
+     with(wordcloud(word, n, max.words = 100))
+
+smokerwords %>%
+     inner_join(get_sentiments("bing")) %>%
+     count(word, sentiment, sort = TRUE) %>%
+     acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+     comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                      max.words = 100)
+
+```
